@@ -4,7 +4,8 @@
            #:really-invoke-debugger
            #:*break-on-failure* #:*break-on-expected-failure*
            #:failure #:make-failure #:failure-type #:failure-file
-           #:failure-name))
+           #:failure-name
+           #:*random-seed*))
 
 (in-package :test-util)
 
@@ -13,6 +14,8 @@
 (defvar *failures* nil)
 (defvar *break-on-failure* nil)
 (defvar *break-on-expected-failure* nil)
+(defvar *random-seed* nil)
+(defvar *initial-random-state* nil)
 
 (defstruct failure
   type
@@ -59,7 +62,10 @@
   (unless (eq *test-file* *load-pathname*)
     (setf *test-file* *load-pathname*)
     (setf *test-count* 0))
-  (incf *test-count*))
+  (incf *test-count*)
+  (unless *initial-random-state*
+    (setf *initial-random-state* (sb-ext:seed-random-state *random-seed*)))
+  (setf *random-state* (make-random-state *initial-random-state*)))
 
 (defun really-invoke-debugger (condition)
   (with-simple-restart (continue "Continue")

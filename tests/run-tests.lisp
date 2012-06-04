@@ -21,16 +21,8 @@
 (defvar *accept-files* nil)
 
 (defun run-all ()
-  (dolist (arg (cdr *posix-argv*))
-    (cond ((string= arg "--break-on-failure")
-           (setf *break-on-error* t)
-           (setf test-util:*break-on-failure* t))
-          ((string= arg "--break-on-expected-failure")
-           (setf test-util:*break-on-expected-failure* t))
-          ((string= arg "--report-skipped-tests")
-           (setf *report-skipped-tests* t))
-          (t
-           (push (truename (parse-namestring arg)) *accept-files*))))
+  (parse-arguments)
+  (prepare-random-seed)
   (pure-runner (pure-load-files) #'load-test)
   (pure-runner (pure-cload-files) #'cload-test)
   (impure-runner (impure-load-files) #'load-test)
@@ -40,6 +32,39 @@
   (sb-ext:exit :code (if (unexpected-failures)
                          1
                          104)))
+
+(defun parse-arguments ()
+  (let ((args (cdr *posix-argv*)))
+    (flet ((match (option)
+             (and (string= (first args) option)
+                  (pop args))))
+      (loop
+        (unless args
+          (return))
+        (cond ((match "--break-on-failure")
+               (setf *break-on-error* t)
+               (setf test-util:*break-on-failure* t))
+              ((match "--break-on-expected-failure")
+               (setf test-util:*break-on-expected-failure* t))
+              ((match "--report-skipped-tests")
+               (setf *report-skipped-tests* t))
+              ((match "--random-seed")
+               (unless (and args
+                            (let ((n (ignore-errors (parse-integer
+                                                     (pop args)
+                                                     :radix 16))))
+                              (and (typep n '(unsigned-byte 256))
+                                   (setf test-util:*random-seed* n))))
+                 (format t "Error: Hexadecimal number expected after --random-seed~%")
+                 (sb-ext:exit :code 105)))
+              (t
+               (push (truename (parse-namestring (pop args)))
+                     *accept-files*)))))))
+
+(defun prepare-random-seed ()
+  (unless test-util:*random-seed*
+    (setf test-util:*random-seed*
+          (random (expt 2 256) (make-random-state t)))))
 
 (defun report ()
   (terpri)
@@ -74,7 +99,9 @@
                             (failure-name fail)))))
            (when (> skipcount 0)
              (format t " (~a tests skipped for this combination of platform and features)~%"
-                     skipcount)))
+                     skipcount))
+           (when (unexpected-results-p)
+             (format t "Random seed: ~16r~%" *random-seed*)))
           (t
            (format t "All tests succeeded~%")))))
 
@@ -122,9 +149,10 @@
     `((in-package :cl-user)
       (use-package :test-util)
       (use-package :assertoid)
-      (setf test-util:*break-on-failure* ,test-util:*break-on-failure*)
-      (setf test-util:*break-on-expected-failure*
-            ,test-util:*break-on-expected-failure*)
+      ,@(loop for var in '(test-util:*break-on-failure*
+                           test-util:*break-on-expected-failure*
+                           test-util:*random-seed*)
+              collect `(setf ,var ,(symbol-value var)))
       (let ((file ,test-file)
             (*break-on-error* ,run-tests::*break-on-error*))
         (declare (special *break-on-error*))
@@ -190,6 +218,14 @@
                          :skipped-broken
                          :skipped-disabled)))
              *all-failures*))
+
+(defun unexpected-results-p ()
+  (notevery (lambda (x)
+              (member (failure-type x)
+                      '(:expected-failure
+                        :skipped-broken
+                        :skipped-disabled)))
+            *all-failures*))
 
 (defun setup-cl-user ()
   (use-package :test-util)
