@@ -48,31 +48,30 @@
     (cond (*all-failures*
            (format t "Status:~%")
            (dolist (fail (reverse *all-failures*))
-             (cond ((eq (car fail) :unhandled-error)
-                    (format t " ~20a ~a~%"
+             (cond ((eq (failure-type fail) :unhandled-error)
+                    (format t " ~21a ~a~%"
                             "Unhandled error"
-                            (enough-namestring (second fail))))
-                   ((eq (car fail) :invalid-exit-status)
-                    (format t " ~20a ~a~%"
+                            (enough-namestring (failure-file fail))))
+                   ((eq (failure-type fail) :invalid-exit-status)
+                    (format t " ~21a ~a~%"
                             "Invalid exit status:"
-                            (enough-namestring (second fail))))
-                   ((eq (car fail) :skipped-disabled)
+                            (enough-namestring (failure-file fail))))
+                   ((eq (failure-type fail) :skipped-disabled)
                     (when *report-skipped-tests*
-                      (format t " ~20a ~a / ~a~%"
+                      (format t " ~21a ~a / ~a~%"
                               "Skipped (irrelevant):"
-                              (enough-namestring (second fail))
-                              (third fail)))
+                              (enough-namestring (failure-file fail))
+                              (failure-name fail)))
                     (incf skipcount))
                    (t
-                    (format t " ~20a ~a / ~a~%"
-                            (ecase (first fail)
+                    (format t " ~21a ~a / ~a~%"
+                            (ecase (failure-type fail)
                               (:expected-failure "Expected failure:")
                               (:unexpected-failure "Failure:")
                               (:unexpected-success "Unexpected success:")
-                              (:skipped-broken "Skipped (broken):")
-                              (:skipped-disabled "Skipped (irrelevant):"))
-                            (enough-namestring (second fail))
-                            (third fail)))))
+                              (:skipped-broken "Skipped (broken):"))
+                            (enough-namestring (failure-file fail))
+                            (failure-name fail)))))
            (when (> skipcount 0)
              (format t " (~a tests skipped for this combination of platform and features)~%"
                      skipcount)))
@@ -133,7 +132,8 @@
         (restart-case
             (handler-bind
                 ((error (lambda (condition)
-                          (push (list :unhandled-error file)
+                          (push (make-failure :type :unhandled-error
+                                              :file file)
                                 test-util::*failures*)
                           (cond (*break-on-error*
                                  (test-util:really-invoke-debugger condition))
@@ -162,12 +162,15 @@
                                       :direction :input
                                       :if-does-not-exist :error)
                 (append-failures (read stream)))
-              (push (list :invalid-exit-status file)
+              (push (make-failure :type :invalid-exit-status
+                                  :file file)
                     *all-failures*)))))))
 
 (defun make-error-handler (file)
   (lambda (condition)
-    (push (list :unhandled-error file) *failures*)
+    (push (make-failure :type :unhandled-error
+                        :file file)
+          *failures*)
     (cond (*break-on-error*
            (test-util:really-invoke-debugger condition))
           (t
@@ -181,10 +184,11 @@
 
 (defun unexpected-failures ()
   (remove-if (lambda (x)
-               (or (eq (car x) :expected-failure)
-                   (eq (car x) :unexpected-success)
-                   (eq (car x) :skipped-broken)
-                   (eq (car x) :skipped-disabled)))
+               (member (failure-type x)
+                       '(:expected-failure
+                         :unexpected-success
+                         :skipped-broken
+                         :skipped-disabled)))
              *all-failures*))
 
 (defun setup-cl-user ()

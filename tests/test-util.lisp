@@ -2,7 +2,9 @@
   (:use :cl :sb-ext)
   (:export #:with-test #:report-test-status #:*failures*
            #:really-invoke-debugger
-           #:*break-on-failure* #:*break-on-expected-failure*))
+           #:*break-on-failure* #:*break-on-expected-failure*
+           #:failure #:make-failure #:failure-type #:failure-file
+           #:failure-name))
 
 (in-package :test-util)
 
@@ -11,6 +13,11 @@
 (defvar *failures* nil)
 (defvar *break-on-failure* nil)
 (defvar *break-on-expected-failure* nil)
+
+(defstruct failure
+  type
+  file
+  name)
 
 (defun log-msg (&rest args)
   (format *trace-output* "~&::: ")
@@ -66,7 +73,10 @@
                type test-name condition)
       (log-msg "~@<~A ~S ~:_due to ~S: ~4I~:_\"~A\"~:>"
                type test-name condition condition))
-  (push (list type *test-file* (or test-name *test-count*))
+  (push (make-failure
+         :type type
+         :file *test-file*
+         :name (or test-name *test-count*))
         *failures*)
   (unless (stringp condition)
     (when (or (and *break-on-failure*
