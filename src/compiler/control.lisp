@@ -47,6 +47,19 @@
 ;;; suppress rotation of loop heads which are the start of a function
 ;;; (i.e. tail calls), as the debugger wants functions to start at the
 ;;; start.
+;;;
+;;; The rotation is also not done if the back edge identified in the
+;;; first step originates from a block that has more than one successor.
+;;; This matches loops that have their terminating condition tested at
+;;; the end, for which a rotation pessimizes the linear order: The
+;;; unrotated loop is entered at its head without branching and contains
+;;; just one conditional branch at its end back to the head, or falling
+;;; through to leave the loop. If the loop was rotated we would enter
+;;; the loop by an unconditional forward jump to the rotated head, then
+;;; have an unconditional jump backwards from the rotated head to the
+;;; remaining blocks in the loop body, ending with a conditional jump
+;;; that either falls through to the unconditional backwards jump or
+;;; jumps over it to leave the loop.
 (defun find-rotated-loop-head (block)
   (declare (type cblock block))
   (let* ((num (block-number block))
@@ -59,7 +72,8 @@
     (cond
      ((and pred
            (not (physenv-nlx-info env))
-           (not (eq (lambda-block (block-home-lambda block)) block)))
+           (not (eq (lambda-block (block-home-lambda block)) block))
+           (null (cdr (block-succ pred))))
       (let ((current pred)
             (current-num (block-number pred)))
         (block DONE
