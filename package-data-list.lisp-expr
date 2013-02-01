@@ -1210,6 +1210,7 @@ possibly temporariliy, because it might be used internally."
                "SIMPLE-EVAL-IN-LEXENV"
                "DEBUG-NAMIFY"
                "FORCE" "DELAY" "PROMISE-READY-P"
+               "ZEROES" "ONES"
                "FIND-RESTART-OR-CONTROL-ERROR"
                "LOAD-AS-SOURCE"
 

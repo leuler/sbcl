@@ -2402,48 +2402,103 @@
                 (or (null min) (minusp min))))
       (values nil t t)))
 
-;;; See _Hacker's Delight_, Henry S. Warren, Jr. pp 58-63 for an
-;;; explanation of LOG{AND,IOR,XOR}-DERIVE-UNSIGNED-{LOW,HIGH}-BOUND.
-;;; Credit also goes to Raymond Toy for writing (and debugging!) similar
-;;; versions in CMUCL, from which these functions copy liberally.
+;;; The functions LOG{AND,IOR,XOR}-DERIVE-UNSIGNED-BOUNDS below use
+;;; algorithms derived from those in the chapter "Propagating Bounds
+;;; through Logical Operations" from _Hacker's Delight_, Henry S.
+;;; Warren, Jr., 2nd ed., pp 87-90.
+;;; We used to implement the algorithms from that source (then its first
+;;; edition) very faithfully here which exposed a weakness of theirs,
+;;; namely worst case quadratical runtime in the number of bits of the
+;;; input values, potentially leading to excessive compilation times for
+;;; expressions involving bignums. To avoid that, I have devised and
+;;; implemented variations of these algorithms that achieve linear
+;;; runtime in all cases.
+;;;
+;;; We'll use the high bound on LOGIOR to explain how this is done.
+;;; To follow, please read Warren's explanations on his "maxOR" function
+;;; and compare this with how the second return value of
+;;; LOGIOR-DERIVE-UNSIGNED-BOUNDS is calculated.
+;;;
+;;; "maxOR" loops starting from the left until it finds a position where
+;;; both B and D are 1 and where it is possible to decrease one of these
+;;; bounds by setting this bit in it to 0 and all following ones to 1
+;;; without the resulting value getting below the corresponding lower
+;;; bound (A or C). This is done by calculating the modified values
+;;; during each iteration where both B and D are 1 and comparing them
+;;; against the lower bounds.
+;;; The trick to avoid the loop is to exchange the order of the steps:
+;;; First determine from which position rightwards it would be allowed
+;;; to change B or D in this way and have the result be larger or equal
+;;; than A or C respectively and then find the leftmost position equal
+;;; to this or to the right of it where both B and D are 1.
+;;; It is quite simple to find from where rightwards B could be modified
+;;; this way: This is the leftmost position where B has a 1 and A a 0,
+;;; or, cheaper to calculate, the leftmost position where A and B
+;;; differ. Thus (INTEGER-LENGTH (LOGXOR A B)) gives us this position
+;;; where a result of 1 corresponds to the rightmost bit position. As we
+;;; don't care which of B or D we modify we can take the maximum of this
+;;; value and of (INTEGER-LENGTH (LOGXOR C D)).
+;;; The rest is equally simple: Build a mask of 1 bits from the thusly
+;;; found position rightwards, LOGAND it with B and D and feed that into
+;;; INTEGER-LENGTH. From this build another mask and LOGIOR it with B
+;;; and D to set the desired bits.
+;;; The special cases where A equals B and/or C equals D are covered by
+;;; the same code provided the mask generator treats an argument of -1
+;;; the same as 0, which both ZEROES and ONES do.
+;;;
+;;; To calculate the low bound on LOGIOR we need to treat X and Y
+;;; independently but the basic idea stays the same.
+;;;
+;;; LOGAND-DERIVE-UNSIGNED-BOUNDS can be derived by sufficiently many
+;;; applications of DeMorgan's law from LOGIOR-DERIVE-UNSIGNED-BOUNDS.
+;;; The implementation additionally avoids work (that is, calculations
+;;; of one's complements) by using the identity (INTEGER-LENGTH X) =
+;;; (INTEGER-LENGTH (LOGNOT X)) and observing that ZEROES is cheaper
+;;; than ONES.
+;;;
+;;; For the low bound on LOGXOR we use Warren's formula
+;;;   minXOR(a, b, c, d) = minAND(a, b, !d, !c) | minAND(!b, !a, c, d)
+;;; where "!" is bitwise negation and "|" is bitwise or. Both minANDs
+;;; are implemented as in LOGAND-DERIVE-UNSIGNED-BOUNDS (the part for
+;;; the first result), sharing the first LOGXOR and INTEGER-LENGTH
+;;; calculations as (LOGXOR A B) = (LOGXOR (LOGNOT B) (LOGNOT A)).
+;;;
+;;; For the high bound on LOGXOR Warren's formula is unnecessarily
+;;; complex. Instead, with (LOGNOT (LOGXOR X Y)) = (LOGXOR X (LOGNOT Y))
+;;; we have
+;;;   maxXOR(a, b, c, d) = !minXOR(a, b, !d, !c)
+;;; and rewriting minXOR as above yields
+;;;   maxXOR(a, b, c, d) = !(minAND(a, b, c, d) | minAND(!b, !a, !d, !c))
+;;; This again shares the first LOGXOR and INTEGER-LENGTH calculations
+;;; between both minANDs and with the ones for the low bound. Also, it
+;;; turns out that only two of the input bounds are needed in negated
+;;; form to calculate both bounds so LOGXOR-DERIVE-UNSIGNED-BOUNDS
+;;; surprisingly becomes the shortest of the three functions.
+;;;
+;;; LEU, 2013-02-??.
 
-(defun logand-derive-unsigned-low-bound (x y)
-  (let ((a (numeric-type-low x))
-        (b (numeric-type-high x))
-        (c (numeric-type-low y))
-        (d (numeric-type-high y)))
-    (loop for m = (ash 1 (integer-length (lognor a c))) then (ash m -1)
-          until (zerop m) do
-          (unless (zerop (logand m (lognot a) (lognot c)))
-            (let ((temp (logandc2 (logior a m) (1- m))))
-              (when (<= temp b)
-                (setf a temp)
-                (loop-finish))
-              (setf temp (logandc2 (logior c m) (1- m)))
-              (when (<= temp d)
-                (setf c temp)
-                (loop-finish))))
-          finally (return (logand a c)))))
-
-(defun logand-derive-unsigned-high-bound (x y)
-  (let ((a (numeric-type-low x))
-        (b (numeric-type-high x))
-        (c (numeric-type-low y))
-        (d (numeric-type-high y)))
-    (loop for m = (ash 1 (integer-length (logxor b d))) then (ash m -1)
-          until (zerop m) do
-          (cond
-            ((not (zerop (logand b (lognot d) m)))
-             (let ((temp (logior (logandc2 b m) (1- m))))
-               (when (>= temp a)
-                 (setf b temp)
-                 (loop-finish))))
-            ((not (zerop (logand (lognot b) d m)))
-             (let ((temp (logior (logandc2 d m) (1- m))))
-               (when (>= temp c)
-                 (setf d temp)
-                 (loop-finish)))))
-          finally (return (logand b d)))))
+(defun logand-derive-unsigned-bounds (x y)
+  (let* ((a (numeric-type-low x))
+         (b (numeric-type-high x))
+         (c (numeric-type-low y))
+         (d (numeric-type-high y))
+         (length-xor-x (integer-length (logxor a b)))
+         (length-xor-y (integer-length (logxor c d))))
+    (values
+     (let* ((mask (zeroes (max length-xor-x length-xor-y)))
+            (index (integer-length (logior mask a c))))
+       (logand a c (zeroes (1- index))))
+     (let* ((mask-x (ones length-xor-x))
+            (mask-y (ones length-xor-y))
+            (index-x (integer-length (logand mask-x b (lognot d))))
+            (index-y (integer-length (logand mask-y d (lognot b)))))
+       (cond ((= index-x index-y)
+              ;; Both indexes are 0 here.
+              (logand b d))
+             ((> index-x index-y)
+              (logand (logior b (ones (1- index-x))) d))
+             (t
+              (logand (logior d (ones (1- index-y))) b)))))))
 
 (defun logand-derive-type-aux (x y &optional same-leaf)
   (when same-leaf
@@ -2463,8 +2518,8 @@
                     ((null y-len)
                      (specifier-type `(unsigned-byte* ,x-len)))
                     (t
-                     (let ((low (logand-derive-unsigned-low-bound x y))
-                           (high (logand-derive-unsigned-high-bound x y)))
+                     (multiple-value-bind (low high)
+                         (logand-derive-unsigned-bounds x y)
                        (specifier-type `(integer ,low ,high)))))
               ;; X is positive, but Y might be negative.
               (cond ((null x-len)
@@ -2484,43 +2539,28 @@
                   ;; We can't tell squat about the result.
                   (specifier-type 'integer)))))))
 
-(defun logior-derive-unsigned-low-bound (x y)
-  (let ((a (numeric-type-low x))
-        (b (numeric-type-high x))
-        (c (numeric-type-low y))
-        (d (numeric-type-high y)))
-    (loop for m = (ash 1 (integer-length (logxor a c))) then (ash m -1)
-          until (zerop m) do
-          (cond
-            ((not (zerop (logandc2 (logand c m) a)))
-             (let ((temp (logand (logior a m) (1+ (lognot m)))))
-               (when (<= temp b)
-                 (setf a temp)
-                 (loop-finish))))
-            ((not (zerop (logandc2 (logand a m) c)))
-             (let ((temp (logand (logior c m) (1+ (lognot m)))))
-               (when (<= temp d)
-                 (setf c temp)
-                 (loop-finish)))))
-          finally (return (logior a c)))))
-
-(defun logior-derive-unsigned-high-bound (x y)
-  (let ((a (numeric-type-low x))
-        (b (numeric-type-high x))
-        (c (numeric-type-low y))
-        (d (numeric-type-high y)))
-    (loop for m = (ash 1 (integer-length (logand b d))) then (ash m -1)
-          until (zerop m) do
-          (unless (zerop (logand b d m))
-            (let ((temp (logior (- b m) (1- m))))
-              (when (>= temp a)
-                (setf b temp)
-                (loop-finish))
-              (setf temp (logior (- d m) (1- m)))
-              (when (>= temp c)
-                (setf d temp)
-                (loop-finish))))
-          finally (return (logior b d)))))
+(defun logior-derive-unsigned-bounds (x y)
+  (let* ((a (numeric-type-low x))
+         (b (numeric-type-high x))
+         (c (numeric-type-low y))
+         (d (numeric-type-high y))
+         (length-xor-x (integer-length (logxor a b)))
+         (length-xor-y (integer-length (logxor c d))))
+    (values
+     (let* ((mask-x (ones length-xor-x))
+            (mask-y (ones length-xor-y))
+            (index-x (integer-length (logand mask-x (lognot a) c)))
+            (index-y (integer-length (logand mask-y (lognot c) a))))
+       (cond ((= index-x index-y)
+              ;; Both indexes are 0 here.
+              (logior a c))
+             ((> index-x index-y)
+              (logior (logand a (zeroes (1- index-x))) c))
+             (t
+              (logior (logand c (zeroes (1- index-y))) a))))
+     (let* ((mask (ones (max length-xor-x length-xor-y)))
+            (index (integer-length (logand mask b d))))
+       (logior b d (ones (1- index)))))))
 
 (defun logior-derive-type-aux (x y &optional same-leaf)
   (when same-leaf
@@ -2531,8 +2571,8 @@
        ((and (not x-neg) (not y-neg))
         ;; Both are positive.
         (if (and x-len y-len)
-            (let ((low (logior-derive-unsigned-low-bound x y))
-                  (high (logior-derive-unsigned-high-bound x y)))
+            (multiple-value-bind (low high)
+                (logior-derive-unsigned-bounds x y)
               (specifier-type `(integer ,low ,high)))
             (specifier-type `(unsigned-byte* *))))
        ((not x-pos)
@@ -2564,41 +2604,25 @@
                 ;; Unbounded.
                 (specifier-type 'integer))))))))
 
-(defun logxor-derive-unsigned-low-bound (x y)
-  (let ((a (numeric-type-low x))
-        (b (numeric-type-high x))
-        (c (numeric-type-low y))
-        (d (numeric-type-high y)))
-    (loop for m = (ash 1 (integer-length (logxor a c))) then (ash m -1)
-          until (zerop m) do
-          (cond
-            ((not (zerop (logandc2 (logand c m) a)))
-             (let ((temp (logand (logior a m)
-                                 (1+ (lognot m)))))
-               (when (<= temp b)
-                 (setf a temp))))
-            ((not (zerop (logandc2 (logand a m) c)))
-             (let ((temp (logand (logior c m)
-                                 (1+ (lognot m)))))
-               (when (<= temp d)
-                 (setf c temp)))))
-          finally (return (logxor a c)))))
-
-(defun logxor-derive-unsigned-high-bound (x y)
-  (let ((a (numeric-type-low x))
-        (b (numeric-type-high x))
-        (c (numeric-type-low y))
-        (d (numeric-type-high y)))
-    (loop for m = (ash 1 (integer-length (logand b d))) then (ash m -1)
-          until (zerop m) do
-          (unless (zerop (logand b d m))
-            (let ((temp (logior (- b m) (1- m))))
-              (cond
-                ((>= temp a) (setf b temp))
-                (t (let ((temp (logior (- d m) (1- m))))
-                     (when (>= temp c)
-                       (setf d temp)))))))
-          finally (return (logxor b d)))))
+(defun logxor-derive-unsigned-bounds (x y)
+  (let* ((a (numeric-type-low x))
+         (b (numeric-type-high x))
+         (c (numeric-type-low y))
+         (d (numeric-type-high y))
+         (not-b (lognot b))
+         (not-d (lognot d))
+         (length-xor-x (integer-length (logxor a b)))
+         (length-xor-y (integer-length (logxor c d)))
+         (mask (zeroes (max length-xor-x length-xor-y))))
+    (values
+     (let ((index-ad (integer-length (logior mask a not-d)))
+           (index-bc (integer-length (logior mask not-b c))))
+       (logior (logand a not-d (zeroes (1- index-ad)))
+               (logand not-b c (zeroes (1- index-bc)))))
+     (let ((index-ac (integer-length (logior mask a c)))
+           (index-bd (integer-length (logior mask not-b not-d))))
+       (lognor (logand a c (zeroes (1- index-ac)))
+               (logand not-b not-d (zeroes (1- index-bd))))))))
 
 (defun logxor-derive-type-aux (x y &optional same-leaf)
   (when same-leaf
@@ -2609,8 +2633,8 @@
         ((and (not x-neg) (not y-neg))
          ;; Both are positive
          (if (and x-len y-len)
-             (let ((low (logxor-derive-unsigned-low-bound x y))
-                   (high (logxor-derive-unsigned-high-bound x y)))
+             (multiple-value-bind (low high)
+                 (logxor-derive-unsigned-bounds x y)
                (specifier-type `(integer ,low ,high)))
              (specifier-type '(unsigned-byte* *))))
         ((and (not x-pos) (not y-pos))

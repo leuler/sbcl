@@ -1311,6 +1311,20 @@
          (values members (or (not (listp tail))
                              (and (>= count max-length) :maybe)))))))
 
+;;;; Generators for simple bit masks
+
+;;; Return an integer consisting of zeroes in its N least significant
+;;; bit positions and ones in all others. If N is negative, return -1.
+(declaim (inline zeroes))
+(defun zeroes (n)
+  (ash -1 n))
+
+;;; Return an integer consisting of ones in its N least significant
+;;; bit positions and zeroes in all others. If N is negative, return 0.
+(declaim (inline ones))
+(defun ones (n)
+  (lognot (ash -1 n)))
+
 ;;; Default evaluator mode (interpeter / compiler)
 
 (declaim (type (member :compile #!+sb-eval :interpret) *evaluator-mode*))
