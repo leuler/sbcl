@@ -1427,7 +1427,13 @@ the first."
             (let ((first-iteration (ash (+ zeroth-iteration quot) -1)))
               (cond ((oddp quot)
                      first-iteration)
-                    ((> (expt (- first-iteration zeroth-iteration) 2) rem)
+                    ((> (if (eq '(dispatch-type n) 'fixnum)
+                            (truly-the fixnum
+                                       (expt (- first-iteration
+                                                zeroth-iteration)
+                                             2))
+                            (expt (- first-iteration zeroth-iteration) 2))
+                        rem)
                      (1- first-iteration))
                     (t
                      first-iteration))))))))
