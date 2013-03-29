@@ -1406,26 +1406,31 @@ the first."
            ((fixnum bignum)
             (bignum-gcd (make-small-bignum u) v))))))
 
-;;;; from Robert Smith; slightly changed not to cons unnecessarily.
+;;; from Robert Smith; changed not to cons unnecessarily, and to dispatch,
+;;; during each recursion step, into a fixnum or a bignum part to speed
+;;; its operation on small numbers up.
 (defun isqrt (n)
   #!+sb-doc
   "Return the greatest integer less than or equal to the square root of N."
   (declare (type unsigned-byte n))
   (cond
     ((> n 24)
-     (let* ((n-fourth-size (ash (1- (integer-length n)) -2))
-            (n-significant-half (ash n (- (ash n-fourth-size 1))))
-            (n-significant-half-isqrt (isqrt n-significant-half))
-            (zeroth-iteration (ash n-significant-half-isqrt n-fourth-size)))
-       (multiple-value-bind (quot rem)
-           (floor n zeroth-iteration)
-         (let ((first-iteration (ash (+ zeroth-iteration quot) -1)))
-           (cond ((oddp quot)
-                  first-iteration)
-                 ((> (expt (- first-iteration zeroth-iteration) 2) rem)
-                  (1- first-iteration))
-                 (t
-                  first-iteration))))))
+     (number-dispatch ((n unsigned-byte))
+       (((foreach fixnum bignum))
+        (let* ((n-fourth-size (ash (1- (integer-length n)) -2))
+               (n-significant-half (ash n (- (ash n-fourth-size 1))))
+               (n-significant-half-isqrt (isqrt n-significant-half))
+               (zeroth-iteration (ash n-significant-half-isqrt
+                                      n-fourth-size)))
+          (multiple-value-bind (quot rem)
+              (floor n zeroth-iteration)
+            (let ((first-iteration (ash (+ zeroth-iteration quot) -1)))
+              (cond ((oddp quot)
+                     first-iteration)
+                    ((> (expt (- first-iteration zeroth-iteration) 2) rem)
+                     (1- first-iteration))
+                    (t
+                     first-iteration))))))))
     ((> n 15) 4)
     ((> n  8) 3)
     ((> n  3) 2)
