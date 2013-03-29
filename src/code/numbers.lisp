@@ -1406,42 +1406,52 @@ the first."
            ((fixnum bignum)
             (bignum-gcd (make-small-bignum u) v))))))
 
-;;; from Robert Smith; changed not to cons unnecessarily, and to dispatch,
-;;; during each recursion step, into a fixnum or a bignum part to speed
-;;; its operation on small numbers up.
+;;; from Robert Smith; changed not to cons unnecessarily, and to dispatch
+;;; into a fixnum or a bignum part to speed its operation on small numbers
+;;; up. For maximum speed, the fixnum part recurs into itself instead of
+;;; dispatching on the type again, which means that we can't use
+;;; NUMBER-DISPATCH here.
 (defun isqrt (n)
   #!+sb-doc
   "Return the greatest integer less than or equal to the square root of N."
   (declare (type unsigned-byte n))
-  (cond
-    ((> n 24)
-     (number-dispatch ((n unsigned-byte))
-       (((foreach fixnum bignum))
-        (let* ((n-fourth-size (ash (1- (integer-length n)) -2))
-               (n-significant-half (ash n (- (ash n-fourth-size 1))))
-               (n-significant-half-isqrt (isqrt n-significant-half))
-               (zeroth-iteration (ash n-significant-half-isqrt
-                                      n-fourth-size)))
-          (multiple-value-bind (quot rem)
-              (floor n zeroth-iteration)
-            (let ((first-iteration (ash (+ zeroth-iteration quot) -1)))
-              (cond ((oddp quot)
-                     first-iteration)
-                    ((> (if (eq '(dispatch-type n) 'fixnum)
-                            (truly-the fixnum
-                                       (expt (- first-iteration
-                                                zeroth-iteration)
-                                             2))
-                            (expt (- first-iteration zeroth-iteration) 2))
-                        rem)
-                     (1- first-iteration))
-                    (t
-                     first-iteration))))))))
-    ((> n 15) 4)
-    ((> n  8) 3)
-    ((> n  3) 2)
-    ((> n  0) 1)
-    ((= n  0) 0)))
+  (macrolet
+      ((isqrt-expr (recurse fixnum-p)
+         `(let* ((n-fourth-size (ash (1- (integer-length n)) -2))
+                 (n-significant-half (ash n (- (ash n-fourth-size 1))))
+                 (n-significant-half-isqrt
+                  (truly-the ,(if fixnum-p
+                                  '(integer 1 #.(isqrt
+                                                 sb!xc:most-positive-fixnum))
+                                  t)
+                             (,recurse n-significant-half)))
+                 (zeroth-iteration (ash n-significant-half-isqrt
+                                        n-fourth-size)))
+            (multiple-value-bind (quot rem)
+                (floor n zeroth-iteration)
+              (let ((first-iteration (ash (+ zeroth-iteration quot) -1)))
+                (cond ((oddp quot)
+                       first-iteration)
+                      ((> (truly-the ,(if fixnum-p 'fixnum t)
+                                     (expt (- first-iteration
+                                              zeroth-iteration)
+                                           2))
+                          rem)
+                       (1- first-iteration))
+                      (t
+                       first-iteration)))))))
+    (typecase n
+      (fixnum (labels ((fixnum-isqrt (n)
+                         (declare (type fixnum n))
+                         (cond ((> n 24)
+                                (isqrt-expr fixnum-isqrt t))
+                               ((> n 15) 4)
+                               ((> n  8) 3)
+                               ((> n  3) 2)
+                               ((> n  0) 1)
+                               ((= n  0) 0))))
+                (fixnum-isqrt n)))
+      (bignum (isqrt-expr isqrt nil)))))
 
 ;;;; miscellaneous number predicates
 
