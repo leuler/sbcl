@@ -1416,19 +1416,18 @@ the first."
   "Return the greatest integer less than or equal to the square root of N."
   (declare (type unsigned-byte n))
   (macrolet
-      ((isqrt-expr (recurse fixnum-p)
-         `(let* ((n-fourth-size (ash (1- (integer-length n)) -2))
-                 (n-significant-half (ash n (- (ash n-fourth-size 1))))
-                 (n-significant-half-isqrt
+      ((isqrt-expr (arg recurse fixnum-p)
+         `(let* ((fourth-size (ash (1- (integer-length ,arg)) -2))
+                 (significant-half (ash ,arg (- (ash fourth-size 1))))
+                 (significant-half-isqrt
                   (truly-the ,(if fixnum-p
                                   '(integer 1 #.(isqrt
                                                  sb!xc:most-positive-fixnum))
                                   t)
-                             (,recurse n-significant-half)))
-                 (zeroth-iteration (ash n-significant-half-isqrt
-                                        n-fourth-size)))
+                             (,recurse significant-half)))
+                 (zeroth-iteration (ash significant-half-isqrt fourth-size)))
             (multiple-value-bind (quot rem)
-                (floor n zeroth-iteration)
+                (floor ,arg zeroth-iteration)
               (let ((first-iteration (ash (+ zeroth-iteration quot) -1)))
                 (cond ((oddp quot)
                        first-iteration)
@@ -1444,14 +1443,14 @@ the first."
       (fixnum (labels ((fixnum-isqrt (n)
                          (declare (type fixnum n))
                          (cond ((> n 24)
-                                (isqrt-expr fixnum-isqrt t))
+                                (isqrt-expr n fixnum-isqrt t))
                                ((> n 15) 4)
                                ((> n  8) 3)
                                ((> n  3) 2)
                                ((> n  0) 1)
                                ((= n  0) 0))))
                 (fixnum-isqrt n)))
-      (bignum (isqrt-expr isqrt nil)))))
+      (bignum (isqrt-expr n isqrt nil)))))
 
 ;;;; miscellaneous number predicates
 
