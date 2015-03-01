@@ -24,6 +24,61 @@
 
 ;;;; mixing hash values
 
+;;;; New implementation
+
+(declaim (inline mix1))
+(defun mix1 (a b c n)
+  (declare (optimize speed)
+           (type (unsigned-byte 64) a b c)
+           (type (integer -63 63) n))
+  (values (logxor a b)
+          (logand (1- (expt 2 64)) (+ b c))
+          (%rotate-word c n)))
+
+(declaim (inline mix3))
+(defun mix3 (a b c rotate-a rotate-b rotate-c)
+  (declare (optimize speed)
+           (type (unsigned-byte 64) a b c)
+           (type (integer -63 63) rotate-a rotate-b rotate-c))
+  (multiple-value-bind (a b c)
+      (mix1 a b c rotate-c)
+    (multiple-value-bind (b c a)
+        (mix1 b c a rotate-a)
+      (multiple-value-bind (c a b)
+          (mix1 c a b rotate-b)
+        (values a b c)))))
+
+(declaim (ftype (sfunction ((unsigned-byte 64) (unsigned-byte 64))
+                           (values (unsigned-byte 64) (unsigned-byte 64)
+                                   (unsigned-byte 64)))
+                seed-hash-state))
+(declaim (inline seed-hash-state))
+(defun seed-hash-state (spice x)
+  (declare (optimize speed)
+           (type (unsigned-byte 64) spice x))
+  (values x spice x))
+
+(declaim (ftype (sfunction ((unsigned-byte 64) (unsigned-byte 64)
+                            (unsigned-byte 64))
+                           (and fixnum unsigned-byte))
+                final-stir-hash-state))
+(declaim (inline final-stir-hash-state))
+(defun final-stir-hash-state (a b c)
+  (declare (optimize speed)
+           (type (unsigned-byte 64) a b c))
+  (multiple-value-bind (a b c)
+      (mix3 a b c 7 25 32)
+    (multiple-value-bind (a b c)
+        (mix3 a b c 60 41 28)
+      (multiple-value-bind (a b c)
+          (mix3 a b c 13 16 19)
+        (multiple-value-bind (a b c)
+            (mix3 a b c 11 16 21)
+          (declare (ignore b c))
+          (ash a (- (1+ sb!vm:n-fixnum-tag-bits))))))))
+
+;;;; Old implementation
+
 ;;; a function for mixing hash values
 ;;;
 ;;; desiderata:
@@ -98,10 +153,20 @@
 (defun quasi-random-address-based-hash (state mask)
   (declare (type (simple-array (and fixnum unsigned-byte) (1)) state))
   ;; Ok with multiple threads - No harm, no foul.
-  (logand (setf (aref state 0) (mix (address-based-counter-val) (aref state 0)))
+  (logand (setf (aref state 0)
+                (mix (address-based-counter-val) (aref state 0)))
           mask))
 
 
+(declaim (inline %sxhash-fixnum))
+(defun %sxhash-fixnum (x)
+  (declare (optimize speed)
+           (type fixnum x))
+  (multiple-value-bind (a b c)
+      (seed-hash-state 5969706904698120050
+                       (logand x sb!xc:most-positive-fixnum))
+    (final-stir-hash-state a b c)))
+
 ;;;; hashing strings
 ;;;;
 ;;;; Note that this operation is used in compiler symbol table

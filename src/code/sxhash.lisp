@@ -12,6 +12,17 @@
 
 (in-package "SB!C")
 
+;; Needed for constant folding in the cross-compiler only.
+#+sb-xc-host
+(defun %rotate-word (word count)
+  (declare (type (integer (#.(- sb!vm:n-word-bits)) (#.sb!vm:n-word-bits))
+                 count)
+           (type (unsigned-byte #.sb!vm:n-word-bits) word))
+  (let ((count (mod count sb!vm:n-word-bits)))
+    (logand (1- (expt 2 sb!vm:n-word-bits))
+            (logior (ash word count)
+                    (ash word (- count sb!vm:n-word-bits))))))
+
 (sb!xc:define-modify-macro mixf (y) mix)
 
 ;;; SXHASH of FLOAT values is defined directly in terms of DEFTRANSFORM in
@@ -34,13 +45,6 @@
                           (logand most-positive-fixnum
                                   (logxor hilo
                                           (ash hilo -7))))))))
-
-;;; SXHASH of FIXNUM values is defined as a DEFTRANSFORM because it's so
-;;; simple.
-(deftransform sxhash ((x) (fixnum))
-  (let ((c (logand 1193941380939624010 sb!xc:most-positive-fixnum)))
-    ;; shift by -1 to get sign bit into hash
-    `(logand (logxor (ash x 4) (ash x -1) ,c) sb!xc:most-positive-fixnum)))
 
 ;;; SXHASH of SIMPLE-BIT-VECTOR values is defined as a DEFTRANSFORM
 ;;; because it is endian-dependent.
@@ -120,6 +124,9 @@
             (if (= 0 result)
                 (ensure-symbol-hash x)
                 result)))))
+
+(deftransform sxhash ((x) (fixnum))
+  '(%sxhash-fixnum x))
 
 (deftransform psxhash ((x &optional depthoid) (character &optional t))
   `(char-code (char-upcase x)))

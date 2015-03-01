@@ -982,6 +982,7 @@ possibly temporarily, because it might be used internally."
 
                ;; hash mixing operations
                "MIX" "MIXF"
+               "%ROTATE-WORD"
 
                ;; Macroexpansion that doesn't touch special forms
                "%MACROEXPAND"
@@ -1492,7 +1493,7 @@ is a good idea, but see SB-SYS re. blurring of boundaries."
                "%SET-SIGNED-SAP-REF-8" "%SET-STACK-REF"
                "%SET-SYMBOL-HASH"
                "%SIN" "%SIN-QUICK" "%SINGLE-FLOAT"
-               "%SINH" "%SQRT" "%SXHASH-SIMPLE-STRING"
+               "%SINH" "%SQRT" "%SXHASH-SIMPLE-STRING" "%SXHASH-FIXNUM"
                #!+sb-simd-pack("%SIMD-PACK-TAG"
                                "%SIMD-PACK-LOW"
                                "%SIMD-PACK-HIGH")

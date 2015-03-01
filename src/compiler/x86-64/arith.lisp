@@ -980,6 +980,22 @@ constant shift greater than word length")))
     (inst sar result :cl)
     (inst and result (lognot fixnum-tag-mask))))
 
+;;;; Rotations
+
+(define-vop (%rotate-word/c)
+  (:policy :fast-safe)
+  (:translate %rotate-word)
+  (:note "inline 64-bit constant rotation")
+  (:args (integer :scs (unsigned-reg) :target result))
+  (:info count)
+  (:arg-types unsigned-num (:constant (integer -63 63)))
+  (:results (result :scs (unsigned-reg)))
+  (:result-types unsigned-num)
+  (:generator 1
+    (aver (not (zerop count)))
+    (move result integer)
+    (inst rol result (mod count 64))))
+
 (in-package "SB!C")
 
 (defknown %lea (integer integer (member 1 2 4 8 16) (signed-byte 64))

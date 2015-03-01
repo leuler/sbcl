@@ -383,6 +383,9 @@
 (defknown %ash/right ((or word sb!vm:signed-word) (mod #.sb!vm:n-word-bits))
   (or word sb!vm:signed-word)
   (movable foldable flushable always-translatable))
+(defknown %rotate-word ((unsigned-byte 64) (integer -63 63))
+    (unsigned-byte 64)
+  (movable foldable flushable))
 (defknown (logcount integer-length) (integer) bit-index
   (movable foldable flushable explicit-check))
 ;;; FIXME: According to the ANSI spec, it's legal to use any
